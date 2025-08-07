@@ -1,118 +1,115 @@
-(async function() {
-  const delay = ms => new Promise(res => setTimeout(res, ms));
-  let deleted = 0;
+(async function () {
+	const delay = (ms) => new Promise((res) => setTimeout(res, ms));
+	let deleted = 0;
 
-  // 找菜单按钮，过滤掉已经打开的（aria-expanded=true）
-  function findMenuButtons() {
-    return [...document.querySelectorAll('button[data-testid="caret"], button[aria-label="更多"]')]
-      .filter(btn => btn.getAttribute('aria-expanded') === 'false');
-  }
+	function findVisibleTweetMenuButtons() {
+		const tweetArticles = [...document.querySelectorAll("article")];
+		const buttons = [];
 
-  // 等待条件成立，timeout 毫秒超时
-  async function waitFor(conditionFn, timeout = 1500, interval = 50) {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-      const result = conditionFn();
-      if (result) return result;
-      await delay(interval);
-    }
-    return null;
-  }
+		tweetArticles.forEach((article) => {
+			const menuBtn = article.querySelector('button[data-testid="caret"], button[aria-label="更多"]');
+			if (menuBtn && menuBtn.getAttribute("aria-expanded") === "false") {
+				buttons.push({ article, menuBtn });
+			}
+		});
 
-  // 等待菜单打开，判断菜单元素是否可见
-  async function waitForMenuOpen(timeout = 1000) {
-    return await waitFor(() => {
-      const menu = document.querySelector('div[role="menu"]');
-      return menu && menu.offsetParent !== null;
-    }, timeout);
-  }
+		return buttons;
+	}
 
-  async function clickMenuAndDelete() {
-    const buttons = findMenuButtons();
-    console.log(`找到 ${buttons.length} 个菜单按钮`);
+	async function waitFor(conditionFn, timeout = 1500, interval = 50) {
+		const start = Date.now();
+		while (Date.now() - start < timeout) {
+			const result = conditionFn();
+			if (result) return result;
+			await delay(interval);
+		}
+		return null;
+	}
 
-    for (const btn of buttons) {
-      try {
-        btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-        await delay(100);
+	async function waitForMenuOpen(timeout = 1000) {
+		return await waitFor(() => {
+			const menu = document.querySelector('div[role="menu"]');
+			return menu && menu.offsetParent !== null;
+		}, timeout);
+	}
 
-        btn.click();
-        await delay(100);
+	async function clickMenuAndDelete() {
+		const tweetButtons = findVisibleTweetMenuButtons();
+		console.log(`找到 ${tweetButtons.length} 个推文菜单按钮`);
 
-        let menuOpened = await waitForMenuOpen();
-        if (!menuOpened) {
-          // 关闭菜单，重试点击
-          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-          await delay(100);
+		for (const { article, menuBtn } of tweetButtons) {
+			try {
+				article.scrollIntoView({ behavior: "instant", block: "center" });
+				await delay(100);
 
-          btn.click();
-          await delay(200);
+				menuBtn.click();
+				await delay(200);
 
-          menuOpened = await waitForMenuOpen();
-        }
+				let menuOpened = await waitForMenuOpen(1500);
+				if (!menuOpened) {
+					// 第一次失败，尝试关闭再点一次
+					document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+					await delay(100);
+					menuBtn.click();
+					await delay(200);
+					menuOpened = await waitForMenuOpen(1500);
+				}
 
-        if (!menuOpened) {
-          console.log('❌ 菜单没打开，跳过该按钮');
-          continue;
-        }
+				if (!menuOpened) {
+					console.log("❌ 菜单没打开，跳过该推文");
+					continue;
+				}
 
-        // 寻找删除相关菜单项
-        let deleteItem = await waitFor(() => {
-          return [...document.querySelectorAll('div[role="menuitem"]')]
-            .find(el => {
-              const text = el?.innerText?.toLowerCase() || '';
-              return text.includes('删除') || text.includes('delete');
-            });
-        }, 1000);
+				const deleteItem = await waitFor(() => {
+					return [...document.querySelectorAll('div[role="menuitem"]')].find((el) =>
+						/删除|delete/i.test(el.innerText)
+					);
+				}, 1000);
 
-        if (!deleteItem) {
-          console.log('❌ 没找到“删除”按钮，关闭菜单并跳过');
-          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-          await delay(100);
-          continue;
-        }
+				if (!deleteItem) {
+					console.log("❌ 没找到“删除”按钮，关闭菜单并跳过");
+					document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+					await delay(100);
+					continue;
+				}
 
-        deleteItem.click();
-        await delay(300);
+				deleteItem.click();
+				await delay(300);
 
-        const confirmBtn = await waitFor(() =>
-          document.querySelector('[data-testid="confirmationSheetConfirm"]'), 1500
-        );
+				const confirmBtn = await waitFor(
+					() => document.querySelector('[data-testid="confirmationSheetConfirm"]'),
+					1500
+				);
 
-        if (confirmBtn) {
-          confirmBtn.click();
-          deleted++;
-          console.log(`✅ 已删除第 ${deleted} 条`);
-        } else {
-          console.log('⚠️ 找不到确认按钮，可能已取消删除');
-        }
+				if (confirmBtn) {
+					confirmBtn.click();
+					deleted++;
+					console.log(`✅ 已删除第 ${deleted} 条`);
+				} else {
+					console.log("⚠️ 找不到确认按钮，可能已取消删除");
+				}
 
-        await delay(700); // 给页面反应时间
-      } catch (e) {
-        console.warn('❌ 删除失败:', e.message);
-        await delay(500);
-      }
-    }
-  }
+				await delay(700);
+			} catch (err) {
+				console.warn("❌ 删除失败：", err.message);
+				await delay(500);
+			}
+		}
+	}
 
-  // 自动滚动并反复删除，最多循环次数限制防止死循环
-  async function autoScrollAndDelete(maxLoops = 100) {
-  for (let i = 0; i < maxLoops; i++) {
-    await clickMenuAndDelete();
+	async function autoScrollAndDelete(maxLoops = 100) {
+		for (let i = 0; i < maxLoops; i++) {
+			await clickMenuAndDelete();
 
-    // 计算滚动位置
-    // 基础滚动到底部
-    let baseScroll = document.body.scrollHeight;
+			const baseScroll = document.body.scrollHeight;
+			const extraScroll = Math.floor(deleted / 5) * 1000;
 
-    // 每删除5条，额外滚动1000px
-    let extraScroll = Math.floor(deleted / 5) * 1000;
+			window.scrollTo(0, baseScroll + extraScroll);
+			await delay(1500);
+		}
 
-    window.scrollTo(0, baseScroll + extraScroll);
+		console.log(`🎉 删除完成，已尝试删除 ${deleted} 条推文`);
+	}
 
-    await delay(1500); // 等待加载
-  }
-  console.log(`🎉 删除完成，已尝试删除 ${deleted} 条推文`);
-}
-
-  await autoScrollAndDelete();
+	await autoScrollAndDelete();
 })();
