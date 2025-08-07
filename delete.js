@@ -16,7 +16,7 @@
 		return buttons;
 	}
 
-	async function waitFor(conditionFn, timeout = 1500, interval = 50) {
+	async function waitFor(conditionFn, timeout = 2000, interval = 50) {
 		const start = Date.now();
 		while (Date.now() - start < timeout) {
 			const result = conditionFn();
@@ -26,7 +26,7 @@
 		return null;
 	}
 
-	async function waitForMenuOpen(timeout = 1000) {
+	async function waitForMenuOpen(timeout = 1500) {
 		return await waitFor(() => {
 			const menu = document.querySelector('div[role="menu"]');
 			return menu && menu.offsetParent !== null;
@@ -35,21 +35,23 @@
 
 	async function clickMenuAndDelete() {
 		const tweetButtons = findVisibleTweetMenuButtons();
-		console.log(`找到 ${tweetButtons.length} 个推文菜单按钮`);
+		console.log(`📍 找到 ${tweetButtons.length} 个推文菜单按钮`);
 
 		for (const { article, menuBtn } of tweetButtons) {
 			try {
 				article.scrollIntoView({ behavior: "instant", block: "center" });
-				await delay(100);
+				await delay(80);
 
+				// 清除焦点避免干扰菜单
+				document.activeElement?.blur?.();
 				menuBtn.click();
-				await delay(200);
+				await delay(150);
 
 				let menuOpened = await waitForMenuOpen(1500);
 				if (!menuOpened) {
-					// 第一次失败，尝试关闭再点一次
+					// 第一次失败后尝试关闭菜单重新点击
 					document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-					await delay(100);
+					await delay(150);
 					menuBtn.click();
 					await delay(200);
 					menuOpened = await waitForMenuOpen(1500);
@@ -60,11 +62,13 @@
 					continue;
 				}
 
-				const deleteItem = await waitFor(() => {
-					return [...document.querySelectorAll('div[role="menuitem"]')].find((el) =>
-						/删除|delete/i.test(el.innerText)
-					);
-				}, 1000);
+				const deleteItem = await waitFor(
+					() =>
+						[...document.querySelectorAll('div[role="menuitem"]')].find((el) =>
+							/删除|delete/i.test(el.innerText)
+						),
+					1200
+				);
 
 				if (!deleteItem) {
 					console.log("❌ 没找到“删除”按钮，关闭菜单并跳过");
@@ -73,7 +77,8 @@
 					continue;
 				}
 
-				deleteItem.click();
+				// 尝试点击删除
+				deleteItem.click?.();
 				await delay(300);
 
 				const confirmBtn = await waitFor(
@@ -89,7 +94,7 @@
 					console.log("⚠️ 找不到确认按钮，可能已取消删除");
 				}
 
-				await delay(700);
+				await delay(600);
 			} catch (err) {
 				console.warn("❌ 删除失败：", err.message);
 				await delay(500);
@@ -101,6 +106,7 @@
 		for (let i = 0; i < maxLoops; i++) {
 			await clickMenuAndDelete();
 
+			// 每删除 5 条推文，滚动更多防止卡住加载
 			const baseScroll = document.body.scrollHeight;
 			const extraScroll = Math.floor(deleted / 5) * 1000;
 
