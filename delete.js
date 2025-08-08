@@ -1,22 +1,52 @@
 (async function () {
-	// 删除所有侧边栏元素
-	const sidebars = document.querySelectorAll(
-		'div.css-175oi2r.r-aqfbo4.r-1l8l4mf.r-1hycxz[data-testid="sidebarColumn"]'
-	);
-	sidebars.forEach((el) => el.remove());
-
-	// 延迟函数，方便控制异步等待时间 / Delay function to await for given milliseconds
 	const delay = (ms) => new Promise((res) => setTimeout(res, ms));
-	let deleted = 0; // 记录已删除的推文数量 / Count of deleted tweets
+	let deleted = 0;
 
-	// 找到所有未展开的菜单按钮（推文右上角的更多按钮） / Find all unopened menu buttons (tweet "More" buttons)
-	function findMenuButtons() {
-		return [...document.querySelectorAll('button[data-testid="caret"], button[aria-label="更多"]')].filter(
-			(btn) => btn.getAttribute("aria-expanded") === "false"
-		); // 过滤掉已经展开的菜单按钮 / Filter out buttons that are already expanded
+	// 更稳健的从页面读取用户名（带@）
+	function getMyUsernameFromPage() {
+		const spans = document.querySelectorAll("span.css-1jxf684.r-bcqeeo.r-1ttztb7.r-qvutc0.r-poiln3");
+		for (const span of spans) {
+			const text = span.innerText?.trim();
+			if (text && text.startsWith("@")) {
+				return text;
+			}
+		}
+		return null;
 	}
 
-	// 等待条件成立，超时则返回 null / Wait until conditionFn returns truthy or timeout (ms) expires
+	// 删除所有侧边栏元素
+	document
+		.querySelectorAll('div.css-175oi2r.r-aqfbo4.r-1l8l4mf.r-1hycxz[data-testid="sidebarColumn"]')
+		.forEach((el) => el.remove());
+
+	const myUsername = getMyUsernameFromPage();
+	if (!myUsername) {
+		console.error("❌ 无法获取用户名，请检查页面结构 / ❌ Unable to get username, please check page structure");
+		return;
+	}
+	console.log("✅ 识别用户名: " + myUsername + " / ✅ Username detected: " + myUsername);
+
+	function findOwnTweetMenuButtons() {
+		const buttons = [...document.querySelectorAll('button[data-testid="caret"], button[aria-label="更多"]')];
+
+		return buttons.filter((btn) => {
+			if (btn.getAttribute("aria-expanded") !== "false") return false;
+
+			const article = btn.closest("article");
+			if (!article) return false;
+
+			const userNameDiv = article.querySelector('div[data-testid="User-Name"]');
+			if (!userNameDiv) return false;
+
+			const userLink = userNameDiv.querySelector('a[href^="/"]');
+			if (!userLink) return false;
+
+			const usernameFromHref = userLink.getAttribute("href").replace(/^\/+/, "").toLowerCase();
+
+			return usernameFromHref === myUsername.replace(/^@/, "").toLowerCase();
+		});
+	}
+
 	async function waitFor(conditionFn, timeout = 1500, interval = 50) {
 		const start = Date.now();
 		while (Date.now() - start < timeout) {
@@ -27,21 +57,18 @@
 		return null;
 	}
 
-	// 等待菜单弹出，判断菜单是否可见 / Wait for the menu to open (visible in DOM)
 	async function waitForMenuOpen(timeout = 1000) {
 		return await waitFor(() => {
 			const menu = document.querySelector('div[role="menu"]');
-			return menu && menu.offsetParent !== null; // 判断元素是否可见 / Check if element is visible
+			return menu && menu.offsetParent !== null;
 		}, timeout);
 	}
 
-	// 主操作函数：依次点击菜单按钮，点击删除，确认删除
-	// 返回 true 表示正常执行完，false 表示连续3次菜单没打开需要滚动加载更多
 	async function clickMenuAndDelete() {
-		let consecutiveMenuFails = 0; // 连续菜单没打开计数器
+		let consecutiveMenuFails = 0;
 
-		const buttons = findMenuButtons();
-		console.log(`🔍 找到 ${buttons.length} 个菜单按钮 / Found ${buttons.length} menu buttons`);
+		const buttons = findOwnTweetMenuButtons();
+		console.log(`🔍 找到 ${buttons.length} 个属于自己的菜单按钮 / Found ${buttons.length} own tweet menu buttons`);
 
 		for (const btn of buttons) {
 			try {
@@ -65,19 +92,19 @@
 				if (!menuOpened) {
 					consecutiveMenuFails++;
 					console.log(
-						`❌ 菜单没打开，跳过该按钮 / Menu not opened, skipping this button (连续失败次数: ${consecutiveMenuFails})`
+						`❌ 菜单没打开，跳过该按钮 (连续失败次数: ${consecutiveMenuFails}) / Menu not opened, skipping this button (consecutive fails: ${consecutiveMenuFails})`
 					);
 
 					if (consecutiveMenuFails >= 3) {
 						console.log(
-							"⚠️ 连续3次菜单没打开，触发滚动加载更多推文 / 3 consecutive menu fails, break to scroll more tweets"
+							"⚠️ 连续3次菜单没打开，触发滚动加载更多推文 / 3 consecutive menu open fails, triggering scroll to load more tweets"
 						);
-						return false; // 返回false表示需要滚动加载更多
+						return false;
 					}
 
 					continue;
 				} else {
-					consecutiveMenuFails = 0; // 菜单打开成功，计数器归零
+					consecutiveMenuFails = 0;
 				}
 
 				let deleteItem = await waitFor(() => {
@@ -103,7 +130,6 @@
 					() => document.querySelector('[data-testid="confirmationSheetConfirm"]'),
 					1500
 				);
-
 				if (confirmBtn) {
 					confirmBtn.click();
 					deleted++;
@@ -121,22 +147,18 @@
 			}
 		}
 
-		return true; // 全部处理完正常结束，返回true
+		return true;
 	}
 
-	// 自动循环执行删除和滚动，最多循环 maxLoops 次
 	async function autoScrollAndDelete(maxLoops = 100) {
 		for (let i = 0; i < maxLoops; i++) {
 			const result = await clickMenuAndDelete();
 
 			if (!result) {
-				// 连续3次菜单没打开，触发滚动加载更多
 				let baseScroll = document.body.scrollHeight;
 				let extraScroll = Math.floor(deleted / 5) * 1000;
-
 				window.scrollTo(0, baseScroll + extraScroll);
-
-				console.log(`⬇️ 页面滚动以加载更多推文 / Scrolling down to load more tweets due to menu fails`);
+				console.log(`⬇️ 页面滚动以加载更多推文 / Scrolling down to load more tweets`);
 				await delay(1500);
 			}
 		}
@@ -144,6 +166,5 @@
 		console.log(`🎉 删除完成，已尝试删除 ${deleted} 条推文 / Done! Attempted to delete ${deleted} tweets`);
 	}
 
-	// 启动脚本
 	await autoScrollAndDelete();
 })();
