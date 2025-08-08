@@ -35,23 +35,24 @@
 		}, timeout);
 	}
 
-	// 主操作函数：依次点击菜单按钮，点击删除，确认删除 / Main operation: click menu, select delete, confirm deletion
+	// 主操作函数：依次点击菜单按钮，点击删除，确认删除
+	// 返回 true 表示正常执行完，false 表示连续3次菜单没打开需要滚动加载更多
 	async function clickMenuAndDelete() {
+		let consecutiveMenuFails = 0; // 连续菜单没打开计数器
+
 		const buttons = findMenuButtons();
 		console.log(`🔍 找到 ${buttons.length} 个菜单按钮 / Found ${buttons.length} menu buttons`);
 
 		for (const btn of buttons) {
 			try {
-				// 滚动到按钮，确保可见 / Scroll button into view
 				btn.scrollIntoView({ behavior: "instant", block: "center" });
 				await delay(100);
 
-				btn.click(); // 点击菜单按钮 / Click menu button
+				btn.click();
 				await delay(100);
 
-				let menuOpened = await waitForMenuOpen(); // 等待菜单展开 / Wait for menu to open
+				let menuOpened = await waitForMenuOpen();
 				if (!menuOpened) {
-					// 菜单没打开，先发 Escape 关闭可能的其他弹窗，然后重试点击 / If menu not opened, send Escape to close overlays, then retry click
 					document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 					await delay(100);
 
@@ -62,11 +63,23 @@
 				}
 
 				if (!menuOpened) {
-					console.log("❌ 菜单没打开，跳过该按钮 / Menu not opened, skipping this button");
+					consecutiveMenuFails++;
+					console.log(
+						`❌ 菜单没打开，跳过该按钮 / Menu not opened, skipping this button (连续失败次数: ${consecutiveMenuFails})`
+					);
+
+					if (consecutiveMenuFails >= 3) {
+						console.log(
+							"⚠️ 连续3次菜单没打开，触发滚动加载更多推文 / 3 consecutive menu fails, break to scroll more tweets"
+						);
+						return false; // 返回false表示需要滚动加载更多
+					}
+
 					continue;
+				} else {
+					consecutiveMenuFails = 0; // 菜单打开成功，计数器归零
 				}
 
-				// 寻找包含“删除”或“delete”字样的菜单项 / Find menu item with "删除" or "delete"
 				let deleteItem = await waitFor(() => {
 					return [...document.querySelectorAll('div[role="menuitem"]')].find((el) => {
 						const text = el?.innerText?.toLowerCase() || "";
@@ -83,17 +96,16 @@
 					continue;
 				}
 
-				deleteItem.click(); // 点击“删除” / Click delete option
+				deleteItem.click();
 				await delay(300);
 
-				// 等待确认删除按钮出现 / Wait for confirmation button
 				const confirmBtn = await waitFor(
 					() => document.querySelector('[data-testid="confirmationSheetConfirm"]'),
 					1500
 				);
 
 				if (confirmBtn) {
-					confirmBtn.click(); // 确认删除 / Confirm deletion
+					confirmBtn.click();
 					deleted++;
 					console.log(`✅ 已删除第 ${deleted} 条 / Deleted tweet #${deleted}`);
 				} else {
@@ -102,32 +114,36 @@
 					);
 				}
 
-				await delay(700); // 给页面反应时间 / Wait some time for page to react
+				await delay(700);
 			} catch (e) {
 				console.warn(`❌ 删除失败: ${e.message} / Deletion failed: ${e.message}`);
 				await delay(500);
 			}
 		}
+
+		return true; // 全部处理完正常结束，返回true
 	}
 
-	// 自动循环执行删除和滚动，最多循环 maxLoops 次 / Auto scroll and delete up to maxLoops times
+	// 自动循环执行删除和滚动，最多循环 maxLoops 次
 	async function autoScrollAndDelete(maxLoops = 100) {
 		for (let i = 0; i < maxLoops; i++) {
-			await clickMenuAndDelete();
+			const result = await clickMenuAndDelete();
 
-			// 计算滚动位置，基础滚动到底部 + 每删除5条增加1000px / Calculate scroll position: base scroll + 1000px per 5 deletions
-			let baseScroll = document.body.scrollHeight;
-			let extraScroll = Math.floor(deleted / 5) * 1000;
+			if (!result) {
+				// 连续3次菜单没打开，触发滚动加载更多
+				let baseScroll = document.body.scrollHeight;
+				let extraScroll = Math.floor(deleted / 5) * 1000;
 
-			window.scrollTo(0, baseScroll + extraScroll);
+				window.scrollTo(0, baseScroll + extraScroll);
 
-			console.log(`⬇️ 页面滚动以加载更多推文 / Scrolling down to load more tweets`);
-			await delay(1500); // 等待加载新推文 / Wait for new tweets to load
+				console.log(`⬇️ 页面滚动以加载更多推文 / Scrolling down to load more tweets due to menu fails`);
+				await delay(1500);
+			}
 		}
 
 		console.log(`🎉 删除完成，已尝试删除 ${deleted} 条推文 / Done! Attempted to delete ${deleted} tweets`);
 	}
 
-	// 启动脚本 / Start script
+	// 启动脚本
 	await autoScrollAndDelete();
 })();
