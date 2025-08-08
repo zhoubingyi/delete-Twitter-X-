@@ -1,4 +1,10 @@
 (async function () {
+	// 删除所有侧边栏元素
+	const sidebars = document.querySelectorAll(
+		'div.css-175oi2r.r-aqfbo4.r-1l8l4mf.r-1hycxz[data-testid="sidebarColumn"]'
+	);
+	sidebars.forEach((el) => el.remove());
+
 	// 延迟函数，方便控制异步等待时间 / Delay function to await for given milliseconds
 	const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 	let deleted = 0; // 记录已删除的推文数量 / Count of deleted tweets
